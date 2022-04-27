@@ -1,0 +1,131 @@
+---
+title: "PSTAT 131 HW 4 COMPLETE"
+author: "Katherine Bayt"
+date: '2022-04-22'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(tidymodels)
+library(corrplot)
+library(ggthemes)
+tidymodels_prefer()
+library(ISLR)
+library(yardstick)
+library(corrr)
+library(discrim)
+library(poissonreg)
+library(klaR)
+library(tune)
+set.seed(4857)
+titanic <- read.csv("C:\\titanic.csv")
+
+titanic$survived <- factor(titanic$survived, levels = c("Yes", "No"))
+titanic$pclass <- factor(titanic$pclass)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## QUESTION 1
+```{r}
+# split the data stratifying on survived
+titanic_split <- initial_split(titanic, prop = 0.7,
+                               strata = survived)
+titanic_train <- training(titanic_split)
+titanic_test <- testing(titanic_split)
+# check num of observations in each set
+dim(titanic_train)
+dim(titanic_test)
+
+# create recipe (same as hw3
+titanic_recipe <- recipe(survived ~ pclass + sex +
+                           age + sib_sp + parch + fare, 
+                         data = titanic_train) %>%
+  step_impute_linear(age) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_interact(terms =~starts_with("sex"):fare) %>%
+  step_interact(terms=~age:fare) 
+
+```
+
+## QUESTION 2
+```{r}
+# fold the training data
+# use k-fold cross-validation w k=10
+titanic_folds <- vfold_cv(titanic_train, v=10)
+titanic_folds
+```
+
+## QUESTION 3
+When using k-fold validation, we fold the training data into k different random subsets of about equal size. One of the folds is then chosen as a holdout set to be used as a validation set. The other k-1 folds are used to train the model. K-fold validation is useful because it allows us to see how our model will react to unforeseen data, thus showing if the model is over fitting. It is also useful because it can be used when we do not have unlimited data to keep testing the model to. If we just tested the model to the training set, there is the danger of over fitting the model to the training set and the model does not do well when it sees new data in the testing set. If we used the entire training set, we would be using the resamplying method of just splitting the data into testing and training sets like we have done on the past three homework sets. 
+
+## QUESTION 4
+```{r}
+# set up 3 workflows
+# 1. logistic regression with glm engine
+log_reg <- logistic_reg() %>%
+  set_engine("glm") %>%
+  set_mode("classification")
+log_wkflow <- workflow() %>%
+  add_model(log_reg) %>%
+  add_recipe(titanic_recipe)
+# 2. linear discriminant analysis with MASS engine
+lda_mod <- discrim_linear() %>%
+  set_mode("classification") %>%
+  set_engine("MASS")
+lda_wkflow <- workflow() %>%
+  add_model(lda_mod) %>%
+  add_recipe(titanic_recipe)
+# 3. quadratic disciminant analysis with MASS engine
+qda_mod <- discrim_quad() %>%
+  set_mode("classification") %>%
+  set_engine("MASS")
+qda_wkflow <- workflow() %>%
+  add_model(qda_mod) %>%
+  add_recipe(titanic_recipe)
+```
+We will be fitting a total of 30 models. We will be fitting 3 different models to each fold and we have 10 folds. 
+
+## QUESTION 5
+```{r}
+control <- control_resamples(save_pred = TRUE)
+# fit each of the models
+# 1. logistic regression
+log_fit <- fit_resamples(log_wkflow, 
+                         titanic_folds, 
+                         control = control)
+# 2. linear disriminant
+lda_fit <- fit_resamples(lda_wkflow, 
+                         titanic_folds, 
+                         control = control)
+# 3.quadratic discriminant 
+qda_fit <- fit_resamples(qda_wkflow, 
+                         titanic_folds, 
+                         control = control)
+```
+
+## QUESTION 6
+```{r}
+# print mean and standard error across all folds 
+collect_metrics(log_fit, metrics = "accuracy")
+collect_metrics(lda_fit)
+collect_metrics(qda_fit)
+
+```
+My lda_model has performed the best. The log model with a higher accuracy mean did not perform best because it also had the highest standard error. Similarily, I did not pick the model with the lowest stanrdard error, the qda model, because it also had the lowest accuracy. Thus, the lda model performed best because it has a reasonably high mean accuracy and a reasonably low standard error.
+
+## QUESTION 7
+```{r}
+qda_fit_train <- fit(qda_wkflow, titanic_train)
+```
+
+##QUESTION 8
+```{r}
+lda_test <- fit(lda_wkflow, titanic_test)
+predict(lda_test, new_data = titanic_test, type = "class") %>% 
+  bind_cols(titanic_test %>% select(survived)) %>% 
+  accuracy(truth = survived, estimate = .pred_class)
+```
+
+The testing accuracy has a value of 0.810, commpared to the training average accuracy of 0.783. Thus, the testing data has don better than that of the training. This is likely because we used cross-validation to train the model, and thus the model works well with new data. 
